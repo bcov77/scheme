@@ -3,6 +3,7 @@
 
 #include "scheme/types.hh"
 #include "scheme/util/meta/util.hh"
+#include "scheme/kinematics/ConformationBase.hh"
 
 #include <boost/any.hpp>
 #include <vector>
@@ -29,6 +30,7 @@ struct SceneBase {
 	virtual ~SceneBase(){}
 
 	virtual shared_ptr<THIS> clone_shallow() const { return clone_deep(); } // default to deep copy
+	virtual shared_ptr<THIS> clone_specific_deep(std::vector<Index> deep_bodies) const { return clone_deep(); }
 	virtual shared_ptr<THIS> clone_deep() const = 0;
 
 	Position position(Index i) const
@@ -101,6 +103,15 @@ struct SceneBase {
 	std::vector<Position> const & symframes() const { return symframes_; }
 	Index nbodies() const { return n_sym_bodies_; }
 	Index nbodies_asym() const { return n_bodies_; }
+
+	// sketch courtesy of brian
+	// template< class ConformationCOP >
+	// void replace_body( Index ib, ConformationCOP conf) {
+	// 	boost::any any_conf = conf;
+	// 	replace_body( ib, any_conf );
+	// }
+
+	virtual void replace_body( Index ib, shared_ptr<ConformationBase const> cb) {}
 
 };
 

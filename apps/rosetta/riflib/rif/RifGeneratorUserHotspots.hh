@@ -14,6 +14,8 @@
 
 
 #include <riflib/rif/RifGenerator.hh>
+#include <scheme/chemical/RotamerIndex.hh>	
+
 
 namespace devel {
 namespace scheme {
@@ -22,8 +24,13 @@ namespace rif {
 struct RifGeneratorUserHotspotsOpts {
 	float hotspot_sample_cart_bound = 1.0;
 	float hotspot_sample_angle_bound = 30.0;
+    float hotspot_score_thresh = -0.5;
+    int   hotspot_nsamples = 10000;
 	float hbond_weight = 2.0;
 	float upweight_multi_hbond = 0.0;
+    int  dump_hotspot_samples = 0;
+    bool single_file_hotspots_insertion = false;
+	Eigen::Vector3f target_center;
 	std::vector<std::string> hotspot_files;
 };
 
@@ -38,7 +45,13 @@ struct RifGeneratorUserHotspots : public RifGenerator {
 		RifGenParamsP params
 	) override;
 
+	void 
+	modify_rotamer_spec(
+		::scheme::chemical::RotamerIndexSpec& rot_spec
+	) override;
+
 };
+
 
 }
 }

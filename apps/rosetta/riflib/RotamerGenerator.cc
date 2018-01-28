@@ -32,7 +32,7 @@
 #include <core/pack/dunbrack/RotamerLibraryScratchSpace.hh>
 #include <core/pack/dunbrack/SingleResidueDunbrackLibrary.hh>
 #include <core/pack/task/TaskFactory.hh>
-#include <core/graph/Graph.hh>
+#include <utility/graph/Graph.hh>
 #include <core/pack/packer_neighbors.hh>
 #include <basic/options/keys/packing.OptionKeys.gen.hh>
 #include <basic/options/option.hh>
@@ -318,7 +318,7 @@ get_rosetta_rot_set(
 	dummy_task->nonconst_residue_task( ir ).restrict_to_repacking();
 	dummy_task->nonconst_residue_task( ir ).or_include_current( false ); //need to do this because the residue was built from internal coords and is probably crumpled up
 	dummy_task->nonconst_residue_task( ir ).or_fix_his_tautomer( true ); //since we only want rotamers for the specified restype
-	core::graph::GraphOP dummy_png = core::pack::create_packer_graph( pose, dummy_sfxn, dummy_task );
+	utility::graph::GraphOP dummy_png = core::pack::create_packer_graph( pose, dummy_sfxn, dummy_task );
 	core::pack::rotamer_set::RotamerSetFactory rsf;
 	core::pack::rotamer_set::RotamerSetOP rotset( rsf.create_rotamer_set( pose.residue( ir ) ) );
 	rotset->set_resid( ir );
@@ -632,7 +632,9 @@ get_richardson_rot_data(
 	       rrdata["TRP"].push_back( RichardsonRotData( "p90 ",     -67 ,     62,  -90,             12, 10 ) );//   -130 to -60
 	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "p90 ",     -67 ,     62,  -80,             12, 10 ) );//   -130 to -60
 
-	       rrdata["TRP"].push_back( RichardsonRotData( "p90 ",      34 ,     62,   90,             12,  8 ) );//   60 to 130
+	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "p90 ",     -34 ,     62,   70,             12,  8 ) );//   60 to 130
+	       rrdata["TRP"].push_back( RichardsonRotData( "p90 ",     -34 ,     62,   90,             12,  8 ) );//   60 to 130
+	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "p90 ",     -34 ,     62,  110,             12,  8 ) );//   60 to 130
 
 	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "t105",    -100 ,   -177, -119,             16, 14 ) );//   -130 to -60
 	       rrdata["TRP"].push_back( RichardsonRotData( "t105",    -100 ,   -177, -105,             16, 14 ) );//   -130 to -60
@@ -642,7 +644,11 @@ get_richardson_rot_data(
 	       rrdata["TRP"].push_back( RichardsonRotData( "t90 ",    -109 ,   -177,   90,             10, 11 ) );//   0 to 100
 	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "t90 ",    -109 ,   -177,  101,             10, 11 ) );//   0 to 100
 
-	       rrdata["TRP"].push_back( RichardsonRotData( "m0  ",      48 ,    -65,   -5,              9, 20 ) );//   -40 to 20
+	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "m0  ",     -48 ,    -65,  -40,              9, 20 ) );//   -40 to 20
+	       rrdata["TRP"].push_back( RichardsonRotData( "m0  ",     -48 ,    -65,   -5,              9, 20 ) );//   -40 to 20
+	       rrdata["TRP"].push_back( RichardsonRotData( "m0  ",     -48 ,    -56,  -51,              9, 20 ) );//TODO: remove extra rotamer for 1a22 TRP
+	
+	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "m0  ",     -48 ,    -65,   20,              9, 20 ) );//   -40 to 20
 
 	if(ER) rrdata["TRP"].push_back( RichardsonRotData( "m95 ",    -195 ,    -65,   76,             11, 19 ) );//   60 to 130
 	       rrdata["TRP"].push_back( RichardsonRotData( "m95 ",    -195 ,    -65,   95,             11, 19 ) );//   60 to 130
@@ -728,12 +734,62 @@ get_richardson_rot_data(
 
 }
 
+//foward decleration
 void
-get_rotamer_index(
-	RotamerIndex & rot_index,
+get_rotamer_spec_default(
+	::scheme::chemical::RotamerIndexSpec & rot_index,
 	bool extra_rotamers,
-	bool extra_primary_rotamers,
+	bool extra_primary_rotamers
+);
+std::shared_ptr<RotamerIndex>
+get_rotamer_index(
+	
+	::scheme::chemical::RotamerIndexSpec const& rot_index_spec
+
+){
+	std::shared_ptr<RotamerIndex> rot_index = std::make_shared<RotamerIndex>();
+
+	
+	//rot_index_spec.fill_rotamer_index(rot_index);
+	//std::cout << "finish fill rotamer index now try loading specific rotamers ...  " << std::endl;
+	
+	//utility::io::ozstream outfile("test_out.text");
+	//rot_index_spec.save(outfile);
+	//outfile.close();
+
+	//utility::io::izstream infile("test_in.text");
+	//rot_index_spec.load(infile);
+	//infile.close();
+	
+	std::cout << "finish builidng rotamer_index now try fill rotamer index ... " << std::endl;
+	rot_index_spec.fill_rotamer_index(*rot_index);
+	return rot_index;
+}
+std::shared_ptr<RotamerIndex>
+get_rotamer_index(
 	std::string cachefile
+
+){
+	std::shared_ptr<RotamerIndex> rot_index = std::make_shared<RotamerIndex>();
+	::scheme::chemical::RotamerIndexSpec rot_index_spec;
+	//load rotamer spec from cache file
+	utility::io::izstream infile(cachefile);
+	if ( ! infile ) {
+		utility_exit_with_message("Rotamer index spec file: " + cachefile +
+			" could not be loaded.\nIf you\'re on the digs and you\'re using an old rifgen, add this line to your flags:\n" 
+			+ "-rif_dock:rot_spec_fname /home/bcov/sc/random/old_rif_rotamer_index_spec.txt");
+	}
+	rot_index_spec.load(infile);
+	rot_index_spec.fill_rotamer_index(*rot_index);
+	return rot_index;
+}
+
+
+void
+get_rotamer_spec_default(
+	::scheme::chemical::RotamerIndexSpec & rot_index,
+	bool extra_rotamers,
+	bool extra_primary_rotamers	
 ){
 	std::cout << "get_rotamer_index" << std::endl;
 
@@ -894,8 +950,8 @@ get_rotamer_index(
 		}
 	}
 
-	rot_index.build_index();
-	std::cout << "done building rotamer index, size: " << rot_index.size() << ", nprimary: " << rot_index.n_primary_rotamers() << std::endl;
+	//rot_index.build_index();
+	//std::cout << "done building rotamer index, size: " << rot_index.size() << ", nprimary: " << rot_index.n_primary_rotamers() << std::endl;
 
 	// for( std::string resname : resnames ){
 	// 	std::cerr << resname << " " <<  rot_index.index_bounds( resname ).second - rot_index.index_bounds( resname ).first << std::endl;
@@ -921,8 +977,8 @@ get_rotamer_index(
 	// }
 
 	// utility_exit_with_message("testing out extra rotamers");
-
 }
+
 
 
 
@@ -1110,7 +1166,7 @@ void get_acceptor_rays_lkball( core::pose::Pose const & pose, int ir, HBRayOpts 
 					anames.push_back( std::make_pair(ir,rsd.atom_name(iacc)));
 					anames.push_back( std::make_pair(ir,rsd.atom_name(iacc)));
 				}
-				else if( aname==" O5'" || (aname==" O3'" && ir < pose.n_residue() && pose.residue(ir+1).is_DNA()) )
+				else if( aname==" O5'" || (aname==" O3'" && ir < pose.size() && pose.residue(ir+1).is_DNA()) )
 				{
 					auto cxyz = rsd.xyz("C5'");
 					auto oxyz = rsd.xyz("O5'");

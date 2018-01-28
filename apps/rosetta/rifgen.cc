@@ -107,8 +107,12 @@ OPT_1GRP_KEY( StringVector, rifgen, donres )
 	OPT_1GRP_KEY( Boolean       , rifgen, extra_rif_rotamers )
 
 	OPT_1GRP_KEY( StringVector  , rifgen, hotspot_groups )
-	OPT_1GRP_KEY( Real          , rifgen, hotspot_sample_cart_bound )
-	OPT_1GRP_KEY( Real          , rifgen, hotspot_sample_angle_bound )
+    OPT_1GRP_KEY( Real          , rifgen, hotspot_sample_cart_bound )
+    OPT_1GRP_KEY( Real          , rifgen, hotspot_sample_angle_bound )
+    OPT_1GRP_KEY( Integer       , rifgen, hotspot_nsamples )
+    OPT_1GRP_KEY( Real          , rifgen, hotspot_score_thresh )
+    OPT_1GRP_KEY( Integer       , rifgen, dump_hotspot_samples )
+    OPT_1GRP_KEY( Boolean		, rifgen, single_file_hotspots_insertion) // added options
 
 	// bounding grids stuff
 	OPT_1GRP_KEY( RealVector        , rifgen, hash_cart_resls        )
@@ -162,8 +166,14 @@ OPT_1GRP_KEY( StringVector, rifgen, donres )
 		NEW_OPT(  rifgen::extra_rif_rotamers               , "" , true );
 
 		NEW_OPT(  rifgen::hotspot_groups                   , "" , utility::vector1<std::string>() );
-		NEW_OPT(  rifgen::hotspot_sample_cart_bound        , "" , 1.0 );
-		NEW_OPT(  rifgen::hotspot_sample_angle_bound       , "" , 30.0 );
+		NEW_OPT(  rifgen::hotspot_sample_cart_bound        , "" , 0.5 );
+        NEW_OPT(  rifgen::hotspot_sample_angle_bound       , "" , 15.0 );
+        NEW_OPT(  rifgen::hotspot_nsamples                 , "" , 10000 );
+        NEW_OPT(  rifgen::hotspot_score_thresh             , "" , -0.5 );
+        NEW_OPT(  rifgen::dump_hotspot_samples             , "" , 1000 );
+        NEW_OPT(  rifgen::single_file_hotspots_insertion	, "" , false);
+
+
 
 		// make bounding grids stuff
 		NEW_OPT( rifgen::hash_cart_resls, "cartesian resolution(s) of hash table(s)"      , utility::vector1<double>() );
@@ -257,6 +267,120 @@ make_bounding_grids(
 	return fname;
 }
 
+std::shared_ptr<::devel::scheme::RifBase> init_rif_and_generators(
+		std::shared_ptr<::devel::scheme::RifFactory> rif_factory,
+		std::vector< std::vector< devel::scheme::VoxelArrayPtr > > & bounding_by_atype,
+		std::vector<float> & RESLS,
+		numeric::xyzVector<core::Real> target_center,
+		std::string outfile,
+		std::vector< ::scheme::shared_ptr<devel::scheme::rif::RifGenerator> > & rif_generators_out
+	){
+	using basic::options::option;
+		using namespace basic::options::OptionKeys;
+			using core::id::AtomID;
+			using std::cout;
+			using std::endl;
+			using namespace devel::scheme;
+			// typedef numeric::xyzVector<core::Real> Vec;
+			// typedef numeric::xyzVector<float> Vecf;
+			// typedef numeric::xyzMatrix<core::Real> Mat;
+			// typedef numeric::xyzTransform<core::Real> Xform;
+			// using ObjexxFCL::format::F;
+			// using ObjexxFCL::format::I;
+			// using devel::scheme::KMGT;
+
+
+	std::shared_ptr<RifBase> rif = rif_factory->create_rif();
+
+	if( utility::file::file_exists( outfile) ){
+		std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+		std::cout << "!!!!! RIF file already exists: " << outfile << " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+		std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
+		utility::io::izstream infile( outfile , std::ios::binary );
+		std::string tmp;
+		runtime_assert( rif->load( infile, tmp ) );
+		std::cout << "   done loading: " << outfile << std::endl;
+		cout << "RIF size: " << KMGT( rif->mem_use() ) << " load: " << rif->load_factor()
+			  << ", sizeof(value_type) " << rif->sizeof_value_type() << endl;
+
+	} else {
+
+
+		
+
+
+		//////////////////////////////////// RIF HBOND gen setup //////////////////////////////////////////
+		bool do_hbond  = option[rifgen::donres]().size() > 0;
+			 do_hbond |= option[rifgen::accres]().size() > 0;
+			 do_hbond &= option[rifgen::hbond_weight]() > 0;
+		if( do_hbond ){
+
+
+			devel::scheme::rif::RifGeneratorSimpleHbondsOpts hbgenopts;
+			hbgenopts.tip_tol_deg = option[ rifgen::tip_tol_deg ]();
+			hbgenopts.rot_samp_resl = option[ rifgen::rot_samp_resl ]();
+			hbgenopts.rot_samp_range = option[ rifgen::rot_samp_range ]();
+			hbgenopts.hbond_cart_sample_hack_range = option[ rifgen::hbond_cart_sample_hack_range ]();
+			hbgenopts.hbond_cart_sample_hack_resl = option[ rifgen::hbond_cart_sample_hack_resl ]();
+			hbgenopts.score_threshold = option[ rifgen::score_threshold ]();
+			hbgenopts.dump_fraction = option[rifgen::rif_hbond_dump_fraction]();
+			hbgenopts.debug = false;
+			hbgenopts.hbond_weight = option[rifgen::hbond_weight]();
+			hbgenopts.upweight_multi_hbond = option[rifgen::upweight_multi_hbond]();
+
+			rif_generators_out.push_back(
+				::scheme::make_shared<devel::scheme::rif::RifGeneratorSimpleHbonds>(
+					  option[ rifgen::donres ]()
+					, option[ rifgen::accres ]()
+					, hbgenopts
+				)
+			);
+
+		}
+
+		////////////////////////// apo gen setup //////////////////////////////
+		if( option[rifgen::apores]().size() ) {
+
+			devel::scheme::rif::RifGeneratorApoHSearchOpts apogenopts;
+			apogenopts.dump_fraction = option[rifgen::rif_apo_dump_fraction]();
+			apogenopts.score_cut_adjust = option[rifgen::score_cut_adjust]();
+			apogenopts.abs_score_cut = option[rifgen::score_threshold]();
+			apogenopts.downweight_hydrophobics = option[rifgen::downweight_hydrophobics]();
+			apogenopts.beam_size_M = option[rifgen::beam_size_M]();
+			apogenopts.dump_fraction = option[rifgen::rif_apo_dump_fraction]();
+
+			rif_generators_out.push_back(
+				::scheme::make_shared<devel::scheme::rif::RifGeneratorApoHSearch>(
+					  option[ rifgen::apores ]()
+					, bounding_by_atype
+					, RESLS
+					, apogenopts
+				)
+			);
+
+		}
+
+		if( option[rifgen::hotspot_groups]().size() ){
+			devel::scheme::rif::RifGeneratorUserHotspotsOpts hspot_opts;
+			auto const & hspot_files = option[rifgen::hotspot_groups]();
+			hspot_opts.hotspot_files.insert( hspot_opts.hotspot_files.end(), hspot_files.begin(), hspot_files.end() );
+			hspot_opts.hotspot_sample_cart_bound = option[ rifgen::hotspot_sample_cart_bound ]();
+            hspot_opts.hotspot_sample_angle_bound = option[ rifgen::hotspot_sample_angle_bound]();
+            hspot_opts.hotspot_nsamples = option[ rifgen::hotspot_nsamples]();
+            hspot_opts.hotspot_score_thresh = option[ rifgen::hotspot_score_thresh]();
+            hspot_opts.dump_hotspot_samples = option[ rifgen::dump_hotspot_samples]();
+			if (!option[ rifgen::dump_hotspot_samples].user()) hspot_opts.dump_hotspot_samples = 0;
+			hspot_opts.hbond_weight = option[rifgen::hbond_weight]();
+			hspot_opts.upweight_multi_hbond = option[rifgen::upweight_multi_hbond]();
+			hspot_opts.single_file_hotspots_insertion = option[rifgen::single_file_hotspots_insertion]();
+			for(int i = 0; i < 3; ++i) hspot_opts.target_center[i] = target_center[i];
+			rif_generators_out.push_back( make_shared<devel::scheme::rif::RifGeneratorUserHotspots>( hspot_opts ) );
+		}
+	}
+
+	return rif;
+}
+
 
 
 int main(int argc, char *argv[]) {
@@ -330,7 +454,7 @@ int main(int argc, char *argv[]) {
 	print_header( "preparing target" );
 	core::pose::PoseOP target = make_shared<core::pose::Pose>();
 	core::import_pose::pose_from_file( *target, target_fname );
-	std::cout << "target nres: " << target->n_residue() << std::endl;
+	std::cout << "target nres: " << target->size() << std::endl;
 	std::string target_tag = utility::file::file_basename( utility::file_basename( target_fname ) );
 
 	Vec target_center(0,0,0);
@@ -350,7 +474,7 @@ int main(int argc, char *argv[]) {
 		target_center /= (double)count;
 		cout << "centering target from " << target_center << " to ( 0, 0, 0 )" << endl;
 		*target = target0;
-		for( int ir = 1; ir <= target0.n_residue(); ++ir ){
+		for( int ir = 1; ir <= target0.size(); ++ir ){
 			for( int ia = 1; ia <= target0.residue_type(ir).natoms(); ++ia ){
 				target->set_xyz( core::id::AtomID(ia,ir), target0.residue(ir).xyz(ia) - target_center );
 			}
@@ -366,7 +490,7 @@ int main(int argc, char *argv[]) {
 					using namespace boost::assign;
 					core::pose::Pose test;
 					core::import_pose::pose_from_file( test, option[rifgen::test_structures]()[1] );
-					for( int ir = 1; ir <= test.n_residue(); ++ir ){
+					for( int ir = 1; ir <= test.size(); ++ir ){
 						for( int ia = 1; ia <= test.residue_type(ir).natoms(); ++ia ){
 							core::id::AtomID aid(ia,ir);
 							test.set_xyz( aid, test.xyz( aid ) - target_center );
@@ -390,11 +514,37 @@ int main(int argc, char *argv[]) {
 					// You clicked /btn_strep//A/TRP`108/CE2
 				}
 
+	std::vector< ::scheme::shared_ptr<devel::scheme::rif::RifGenerator> > generators;
+	//temp move here for testing 
+	std::vector< std::vector< VoxelArrayPtr > > bounding_by_atype( RESLS.size() );
+	// std::shared_ptr<::devel::scheme::RifFactory> rif_factory,
+	// 	std::vector< std::vector< devel::scheme::VoxelArrayPtr > > & bounding_by_atype,
+	// 	std::vector<float> & RESLS,
+	// 	numeric::xyzVector<core::Real> target_center,
+	// 	std::string outfile,
+	// 	std::vector< ::scheme::shared_ptr<devel::scheme::rif::RifGenerator> > & rif_generators_out
+	
+	shared_ptr<RifBase> rif = init_rif_and_generators(rif_factory, bounding_by_atype, RESLS, target_center, outfile, generators);
 
+	
+	::scheme::chemical::RotamerIndexSpec rot_index_spec;
+	std::cout << "Preparing rotamer index spec..." << std::endl;
+	get_rotamer_spec_default(rot_index_spec,option[rifgen::extra_rotamers](), option[rifgen::extra_rif_rotamers]());
 
-	shared_ptr<RotamerIndex> rot_index_p( new RotamerIndex );
+	for( int igen = 0; igen < generators.size(); ++igen )
+	{
+		//cache the input 
+		generators[igen]->modify_rotamer_spec( rot_index_spec );
+	}
+	std::string rot_spec_fname = outdir +"/rotamer_index_spec.txt";
+	utility::io::ozstream spec_out(rot_spec_fname);
+	rot_index_spec.save(spec_out);
+	spec_out.close();
+
+	shared_ptr<RotamerIndex> rot_index_p = ::devel::scheme::get_rotamer_index( rot_index_spec );
 		RotamerIndex & rot_index( *rot_index_p );
-		get_rotamer_index( rot_index, option[rifgen::extra_rotamers](), option[rifgen::extra_rif_rotamers]() );
+
+		
 		// utility::io::ozstream riout( "trp_rots.pdb" );
 		// rot_index.dump_pdb( riout, "TRP" );
 		// riout.close();
@@ -427,7 +577,8 @@ int main(int argc, char *argv[]) {
 	std::string fname_grids_for_docking;
 	// typedef VoxelArray* VoxelArrayPtr;
 	std::vector< VoxelArrayPtr > field_by_atype;
-	std::vector< std::vector< VoxelArrayPtr > > bounding_by_atype( RESLS.size() );
+	
+
 	if( option[rifgen::test_without_rosetta_fields]() ){
 		std::cerr << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
 		std::cerr << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! must re-enable reading rosetta_fields !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
@@ -499,87 +650,7 @@ int main(int argc, char *argv[]) {
 		}
 	}
 
-	shared_ptr<RifBase>	rif = rif_factory->create_rif();
-
-	if( utility::file::file_exists( outfile) ){
-		std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
-		std::cout << "!!!!! RIF file already exists: " << outfile << " !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
-		std::cout << "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
-		utility::io::izstream infile( outfile , std::ios::binary );
-		std::string tmp;
-		runtime_assert( rif->load( infile, tmp ) );
-		std::cout << "   done loading: " << outfile << std::endl;
-		cout << "RIF size: " << KMGT( rif->mem_use() ) << " load: " << rif->load_factor()
-			  << ", sizeof(value_type) " << rif->sizeof_value_type() << endl;
-
-	} else {
-
-
-		std::vector< ::scheme::shared_ptr<devel::scheme::rif::RifGenerator> > generators;
-
-
-		//////////////////////////////////// RIF HBOND gen setup //////////////////////////////////////////
-		bool do_hbond  = option[rifgen::donres]().size() > 0;
-			 do_hbond |= option[rifgen::accres]().size() > 0;
-			 do_hbond &= option[rifgen::hbond_weight]() > 0;
-		if( do_hbond ){
-
-
-			devel::scheme::rif::RifGeneratorSimpleHbondsOpts hbgenopts;
-			hbgenopts.tip_tol_deg = option[ rifgen::tip_tol_deg ]();
-			hbgenopts.rot_samp_resl = option[ rifgen::rot_samp_resl ]();
-			hbgenopts.rot_samp_range = option[ rifgen::rot_samp_range ]();
-			hbgenopts.hbond_cart_sample_hack_range = option[ rifgen::hbond_cart_sample_hack_range ]();
-			hbgenopts.hbond_cart_sample_hack_resl = option[ rifgen::hbond_cart_sample_hack_resl ]();
-			hbgenopts.score_threshold = option[ rifgen::score_threshold ]();
-			hbgenopts.dump_fraction = option[rifgen::rif_hbond_dump_fraction]();
-			hbgenopts.debug = false;
-			hbgenopts.hbond_weight = option[rifgen::hbond_weight]();
-			hbgenopts.upweight_multi_hbond = option[rifgen::upweight_multi_hbond]();
-
-			generators.push_back(
-				::scheme::make_shared<devel::scheme::rif::RifGeneratorSimpleHbonds>(
-					  option[ rifgen::donres ]()
-					, option[ rifgen::accres ]()
-					, hbgenopts
-				)
-			);
-
-		}
-
-		////////////////////////// apo gen setup //////////////////////////////
-		if( option[rifgen::apores]().size() ) {
-
-			devel::scheme::rif::RifGeneratorApoHSearchOpts apogenopts;
-			apogenopts.dump_fraction = option[rifgen::rif_apo_dump_fraction]();
-			apogenopts.score_cut_adjust = option[rifgen::score_cut_adjust]();
-			apogenopts.abs_score_cut = option[rifgen::score_threshold]();
-			apogenopts.downweight_hydrophobics = option[rifgen::downweight_hydrophobics]();
-			apogenopts.beam_size_M = option[rifgen::beam_size_M]();
-			apogenopts.dump_fraction = option[rifgen::rif_apo_dump_fraction]();
-
-			generators.push_back(
-				::scheme::make_shared<devel::scheme::rif::RifGeneratorApoHSearch>(
-					  option[ rifgen::apores ]()
-					, bounding_by_atype
-					, RESLS
-					, apogenopts
-				)
-			);
-
-		}
-
-		if( option[rifgen::hotspot_groups]().size() ){
-			devel::scheme::rif::RifGeneratorUserHotspotsOpts hspot_opts;
-			auto const & hspot_files = option[rifgen::hotspot_groups]();
-			hspot_opts.hotspot_files.insert( hspot_opts.hotspot_files.end(), hspot_files.begin(), hspot_files.end() );
-			hspot_opts.hotspot_sample_cart_bound = option[ rifgen::hotspot_sample_cart_bound ]();
-			hspot_opts.hotspot_sample_angle_bound = option[ rifgen::hotspot_sample_angle_bound]();
-			hspot_opts.hbond_weight = option[rifgen::hbond_weight]();
-			hspot_opts.upweight_multi_hbond = option[rifgen::upweight_multi_hbond]();
-			generators.push_back( make_shared<devel::scheme::rif::RifGeneratorUserHotspots>( hspot_opts ) );
-		}
-
+	
 
 
 		///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -596,13 +667,14 @@ int main(int argc, char *argv[]) {
 
 		for( int igen = 0; igen < generators.size(); ++igen )
 		{
+			//cache the input 
 			generators[igen]->generate_rif( rif_accum, params );
 		}
 		std::cout << "RifGenerators done" << std::endl;
 
 
 		uint64_t N_motifs_found = rif_accum->n_motifs_found();
-		N_motifs_found += rif_accum->total_samples();
+		// N_motifs_found += rif_accum->total_samples();
 		std::cout << "RIFAccumulator building rif...." << std::endl;
 		rif_accum->condense();
 		rif = rif_accum->rif();
@@ -697,7 +769,6 @@ int main(int argc, char *argv[]) {
 			}
 
 			std::cout << "done writing" << std::endl;
-		} // end if outfile option
 
 	} // end if not outfile exists
 
@@ -712,7 +783,7 @@ int main(int argc, char *argv[]) {
 			core::pose::Pose test;
 			core::import_pose::pose_from_file( test, testfile );
 			{
-				for( int ir = 1; ir <= test.n_residue(); ++ir ){
+				for( int ir = 1; ir <= test.size(); ++ir ){
 					for( int ia = 1; ia <= test.residue_type(ir).natoms(); ++ia ){
 						core::id::AtomID aid(ia,ir);
 						test.set_xyz( aid, test.xyz( aid ) - target_center );
@@ -725,14 +796,14 @@ int main(int argc, char *argv[]) {
 
 			std::vector<std::vector<float> > onebody_rotamer_energies; {
 				utility::vector1<core::Size> test_res;
-				for( int i = 1; i <= test.n_residue(); ++i) test_res.push_back(i);
+				for( int i = 1; i <= test.size(); ++i) test_res.push_back(i);
 				std::string cachefile = "__1BE_" + utility::file_basename( testfile ) + (replace_all_with_ala_1bre?"_ALLALA":"") + ".bin.gz";
 				get_onebody_rotamer_energies( test, test_res, rot_index, onebody_rotamer_energies, cache_data_path, cachefile, replace_all_with_ala_1bre );
 			}
 
 			typedef std::pair<int,Vec> ClashCrd;
 			std::vector< ClashCrd > clash_coords;
-			for( int ir = 1; ir <= test.n_residue(); ++ir ){ // very hacky clash_dis check
+			for( int ir = 1; ir <= test.size(); ++ir ){ // very hacky clash_dis check
 				if( ! test.residue(ir).is_protein() ) continue;
 				if( test.residue(ir).has("CA") ) clash_coords.push_back( std::make_pair( ir, test.residue(ir).xyz("CA") ) );
 				if( test.residue(ir).has("C" ) ) clash_coords.push_back( std::make_pair( ir, test.residue(ir).xyz("C" ) ) );
@@ -740,7 +811,7 @@ int main(int argc, char *argv[]) {
 			}
 
 			// std::cout << "dump test results to " << resultfile << std::endl;
-			for( int ir = 1; ir <= test.n_residue(); ++ir){
+			for( int ir = 1; ir <= test.size(); ++ir){
 
 				// score native residue
 				// {
@@ -849,13 +920,14 @@ int main(int argc, char *argv[]) {
 		std::cout << "-in:file:extra_res_fa           " << option[basic::options::OptionKeys::in::file::extra_res_fa]()[1] << std::endl;
 	if( target_reslist_file.size() )
 		std::cout << "-rif_dock:target_res            " << target_reslist_file << std::endl;
-	    std::cout << "-rif_dock:target_rf_resl        " << rf_resl << std::endl;
-		std::cout << "-rif_dock:target_rf_cache       " << fname_grids_for_docking << std::endl;
+	std::cout <<     "-rif_dock:target_rf_resl        " << rf_resl << std::endl;
+	std::cout <<     "-rif_dock:target_rf_cache       " << fname_grids_for_docking << std::endl;
 	for( auto s : bounding_grid_fnames )
 		std::cout << "-rif_dock:target_bounding_xmaps " << s << std::endl;
-		std::cout << "-rif_dock:target_rif            " << outfile << std::endl;
-		std::cout << "-rif_dock:extra_rotamers        " << option[rifgen::extra_rotamers]() << std::endl;
-		std::cout << "-rif_dock:extra_rif_rotamers    " << option[rifgen::extra_rif_rotamers]() << std::endl;
+	std::cout <<     "-rif_dock:target_rif            " << outfile << std::endl;
+	std::cout <<     "-rif_dock:extra_rotamers        " << option[rifgen::extra_rotamers]() << std::endl;
+	std::cout <<     "-rif_dock:extra_rif_rotamers    " << option[rifgen::extra_rif_rotamers]() << std::endl;
+	std::cout <<     "-rif_dock:rot_spec_fname        " << rot_spec_fname << std::endl;
 	std::cout << "#################################################################################################################" << std::endl;
 
 	return 0;

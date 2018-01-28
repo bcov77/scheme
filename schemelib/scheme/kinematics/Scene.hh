@@ -37,16 +37,22 @@ namespace f = boost::fusion;
 
 namespace impl {
 
-	template< class ActorContainer >
-	struct Conformation : util::meta::ContainerInstanceMap<ActorContainer> {
+	template< class ActorContainer, class _CacheData=uint64_t >
+	struct Conformation : util::meta::ContainerInstanceMap<ActorContainer>, ConformationBase {
 		typedef typename util::meta::ContainerInstanceMap<ActorContainer>::Keys Actors;
+		typedef _CacheData CacheData;
 		Conformation(){}
 		template<class Actor>
 		void add_actor(Actor const & a){
 			this->template get<Actor>().insert(this->template get<Actor>().end(),a);
 		}
+
+		// access this directly, no getters or setters
+		shared_ptr<CacheData> cache_data_;
 	};
 
+	// Brian - Even though this thing is templated on Index, when I showed up it didn't use Index
+	//   This class shall remain templated on Index, but let it be known that Index is not used or respected
 	///@brief holds a Conformation pointer and an Xform
 	template<
 		class _Conformation,
@@ -56,7 +62,7 @@ namespace impl {
 	struct BodyTplt {
 		typedef BodyTplt<_Conformation,Index> This;
 		typedef _Conformation Conformation;
-		typedef _Conformation ConformationConst; // TODO: fix this, requires figuring out Cereal load_and_construct
+		typedef _Conformation const ConformationConst; // TODO: fix this, requires figuring out Cereal load_and_construct
 		// typedef _Position Position;
 
 		BodyTplt() : conformation_() {}
@@ -91,6 +97,12 @@ namespace impl {
 		// void set_position(Position const & p){ position_ = p; }
 
 		Conformation const & conformation() const { return *conformation_; }
+		shared_ptr<ConformationConst> conformation_ptr() const { return conformation_; }
+
+		void
+		replace_conformation( shared_ptr<ConformationConst> new_conf) {
+			conformation_ = new_conf;
+		}
 
 		#ifdef CEREAL
 		    // friend class boost::serialization::access;
@@ -292,6 +304,8 @@ namespace impl {
 }
 
 
+
+
 ///////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////// Scene / //////////////////////////
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -300,18 +314,23 @@ namespace impl {
 	template<typename T> T inverse(T const & t){ return t.inverse(); }
 
 	template<
-		class _ActorContainers,
+		class _Conformation,
 		class _Position,
 		class _Index = uint64_t
 	>
 	struct Scene : public SceneBase<_Position,_Index> {
 
 		typedef SceneBase<_Position,_Index> Base;
-		typedef Scene<_ActorContainers,_Position,_Index> This;
+		typedef Scene<_Conformation,_Position,_Index> This;
 		typedef _Position Position;
 		typedef _Index Index;
-		typedef impl::Conformation<_ActorContainers> Conformation;
-		typedef impl::Conformation<_ActorContainers> ConformationConst;
+		// bcov
+		// old
+		// typedef impl::Conformation<_ActorContainers> Conformation;
+		// typedef impl::Conformation<_ActorContainers> ConformationConst;
+		// new
+		typedef _Conformation Conformation;
+		typedef _Conformation const ConformationConst;
 		typedef typename Conformation::Actors Actors;
 		typedef impl::BodyTplt<Conformation,Index> Body;
 		typedef std::vector<Body> Bodies;
@@ -325,15 +344,28 @@ namespace impl {
 			this->update_symmetry( (Index)bodies_.size() );
 		}
 
-		Scene( This const & o, bool deep = 1 ) : Base(o) {
+		Scene( This const & o, bool deep = 1, std::vector<Index> const & deep_bodies = std::vector<Index>() ) : Base(o) {
 			if( deep ){
 				bodies_.resize(o.bodies_.size());
-				for( int i = 0; i < bodies_.size(); ++i ){
-					bodies_[i].deepcopy( o.bodies_[i] );
+				if ( deep_bodies.size() == 0) {
+					for( int i = 0; i < bodies_.size(); ++i ){
+						bodies_[i].deepcopy( o.bodies_[i] );
+					}
+				} else {
+					for( int i = 0; i < bodies_.size(); ++i ){
+						if ( std::find( deep_bodies.begin(), deep_bodies.end(), i ) != deep_bodies.end() ) {
+							bodies_[i].deepcopy( o.bodies_[i] );
+						} else {
+							bodies_[i] = o.bodies_[i];
+						}
+					}
 				}
 			} else {
 				bodies_ = o.bodies_; // is shallow copy
 			}
+		}
+		virtual shared_ptr<Base> clone_specific_deep(std::vector<Index> deep_bodies) const {
+			return make_shared<This>(*this,true,deep_bodies);
 		}
 		virtual shared_ptr<Base> clone_deep() const {
 			return make_shared<This>(*this,true);
@@ -389,6 +421,24 @@ namespace impl {
 			this->update_symmetry( (Index)bodies_.size() );
 			assert( bodies_.size() == this->positions_.size() );
 		}
+		// Replaces a body with an empty one without modifying it
+		void reset_body(Index i) {
+			bodies_.at(i).replace_conformation(make_shared<ConformationConst>());
+			this->positions_.at(i) = Position::Identity();
+			this->update_symmetry( (Index)bodies_.size() );
+		}
+		// Replaces a body with another one
+		// Does not reset position
+		void replace_body(Index i, shared_ptr<ConformationConst> conformation) {
+			bodies_.at(i).replace_conformation(conformation);
+			this->update_symmetry( (Index)bodies_.size() );
+		}
+		virtual void replace_body( Index ib, shared_ptr<ConformationBase const> cb) {
+			replace_body(ib, std::dynamic_pointer_cast<ConformationConst>(cb));
+		}
+		// virtual void replace_body( Index ib, boost::any & a) {
+		// 	replace_body(ib, boost::any_cast<shared_ptr<ConformationConst>>(a));
+		// }
 		// void add_body(Body const & b){
 		// 	bodies_.push_back(b);
 		// 	positions_.push_back(Position::Identity());
@@ -400,6 +450,7 @@ namespace impl {
 
 
 		Conformation const & conformation(Index i) const { return bodies_.at(i%bodies_.size()).conformation(); }
+		shared_ptr<Conformation const> conformation_ptr(Index i) const { return bodies_.at(i%bodies_.size()).conformation_ptr(); }
 		// Body const & body       (Index i) const { return bodies_.at(i); }
 
 		/// mainly internal use
@@ -865,6 +916,53 @@ namespace impl {
 		ActorDumpPDB<Scene,MetaData> dumper( scene, out, meta );
 		boost::mpl::for_each< typename Scene::Actors >( dumper );
 	}
+
+
+// ScaffoldProviderScene makes these assumptions
+// - Only one body is going to be using a ScaffoldProvider
+
+	// template<
+	// 	class _ScaffoldProvider,
+	// 	class _Conformation,
+	// 	class _Position,
+	// 	class _Index = uint64_t
+	// >
+	// struct ScaffoldProviderScene : public Scene<_Conformation,_Position,_Index> {
+	// 	typedef Scene<_Conformation,_Position,_Index> Parent;
+
+
+	// 	typedef _ScaffoldProvider ScaffoldProvider;
+	// 	typedef typename ScaffoldProvider::ScaffoldIndex ScaffoldIndex;
+	// 	typedef _Conformation Conformation;
+	// 	typedef _Position Position;
+	// 	typedef _Index Index;
+
+	// 	typedef shared_ptr<_ScaffoldProvider> ScaffoldProviderOP;
+
+	// 	// this must be the same as ScaffoldProviderNEST::DirectorValue
+	// 	typedef std::pair<ScaffoldIndex,Position> DirectorPosition;
+
+	// 	ScaffoldProviderScene( ScaffoldProviderOP scaffold_provider, Index body_index ) :
+	// 		scaffold_provider_(scaffold_provider),
+	// 		body_index_(body_index) {}
+
+
+	// 	void set_position( Index i, DirectorPosition const & newp) {
+	// 		assert( scaffold_provider_ );
+	// 		Position const & p = newp.second;
+	// 		if ( i == body_index_ ) {
+	// 			replace_body( body_index_, scaffold_provider_->get_scaffold( newp.first ) );
+	// 		}
+	// 		Parent::set_position( i, p );
+	// 	}
+
+
+	// private:
+	// 	ScaffoldProviderOP scaffold_provider_;
+	// 	Index body_index_;
+
+	// };
+
 
 
 }

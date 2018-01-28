@@ -26,24 +26,32 @@ message( "c++ standard .................. " "c++${CXX_STD}" )
 if( ${CXX_STD} MATCHES 11 )
   set( CXX_DIR cxx11_omp )
   add_definitions( -DCXX11 )
-  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -w -fno-omit-frame-pointer" )
+  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -w -fno-omit-frame-pointer -Wall -Wextra -Werror" )
 elseif( ${CXX_STD} MATCHES 14 )
 	set( CXX_DIR cxx14_omp )
   add_definitions( -DCXX11 )
   add_definitions( -DCXX14 )
-	set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -w -fno-omit-frame-pointer" )
+	set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -w -fno-omit-frame-pointer -Wall -Wextra -Werror" )
 else()
 	message( FATAL_ERROR "bad CXX_STD ${CXX_STD}" )
 endif()
 
 string(TOUPPER "${CMAKE_BUILD_TYPE}" U_CMAKE_BUILD_TYPE)
 if( ${U_CMAKE_BUILD_TYPE} MATCHES DEBUG )
-	set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Og" )
-	# set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_omp_debug )
-	set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_debug )
+
+    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Og" )
+    # set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_omp_debug )
+    set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_debug )
+    if (NOT $ENV{CMAKE_FINAL_ROSETTA_PATH} STREQUAL "")
+        set( ROSETTA_BIN $ENV{CMAKE_FINAL_ROSETTA_PATH} )
+    endif()
+
 else()
-	# set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_omp )
-	set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR} )
+    # set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR}_omp )
+    set( ROSETTA_BIN $ENV{CMAKE_ROSETTA_PATH}/source/cmake/build_${CXX_DIR} )
+    if (NOT $ENV{CMAKE_FINAL_ROSETTA_PATH} STREQUAL "")
+        set( ROSETTA_BIN $ENV{CMAKE_FINAL_ROSETTA_PATH} )
+    endif()
 endif()
 message( "path to rosetta binaries ...... " ${ROSETTA_BIN} )
 
@@ -98,6 +106,12 @@ ENDIF("${isSystemDir}" STREQUAL "-1")
 # # remove sublime text turds
 # message( "removing ._* turds from " ${CMAKE_SOURCE_DIR} )
 # execute_process( COMMAND find ${CMAKE_SOURCE_DIR} -regex .*[.]_.* -exec rm {} \; )
+
+
+if ( ${USEHDF5} )
+    add_definitions("-DUSEHDF5")
+endif()
+
 
 
 add_subdirectory(schemelib)

@@ -26,6 +26,7 @@
 
 	#include <core/id/AtomID.hh>
 	#include <core/pose/Pose.hh>
+        #include <core/pose/variant_util.hh>
 	#include <core/scoring/motif/util.hh>
 
 	#include <devel/init.hh>
@@ -224,6 +225,7 @@ struct HBJob {
 		// build up a joblist for hbond rif gen
 		std::vector<HBJob> hb_jobs;
 		core::chemical::ResidueTypeSetCAP rts = core::chemical::ChemicalManager::get_instance()->residue_type_set("fa_standard");
+
 		for(int ires = 1; ires <= target_res.size(); ++ires){
 			int const ir = target_res[ires];
 			std::string resn = target.residue(ir).name();
@@ -242,7 +244,8 @@ struct HBJob {
 				j.don_or_acc = "DON_";
 				std::pair<size_t,size_t> b = rot_index.index_bounds(j.acc.substr(0,3));
 				j.nrots = b.second-b.first;
-				if( target.residue(ir).is_protein() && target.residue(ir).has("H") ) hb_jobs.push_back( j );
+				//if( target.residue(ir).is_protein() && target.residue(ir).has("H") ) hb_jobs.push_back( j );
+				if( target.residue(ir).has("H") ) hb_jobs.push_back( j );
 				if( std::find(donresn_std.begin(),donresn_std.end(),resn)!=donresn_std.end() ){ // is donor
 					j.don = resn;
 					hb_jobs.push_back( j );
@@ -260,7 +263,8 @@ struct HBJob {
 				j.don_or_acc = "ACC_";
 				std::pair<size_t,size_t> b = rot_index.index_bounds(j.don.substr(0,3));
 				j.nrots = b.second-b.first;
-				if( target.residue(ir).is_protein() && target.residue(ir).has("O") && target.residue(ir).name3()!="PRO" ) hb_jobs.push_back( j );
+				//if( target.residue(ir).is_protein() && target.residue(ir).has("O") ) hb_jobs.push_back( j );
+				if( target.residue(ir).has("O") ) hb_jobs.push_back( j );
 				if( std::find(accresn_std.begin(),accresn_std.end(),resn)!=accresn_std.end() ){ // is acceptor
 					j.acc = resn;
 					hb_jobs.push_back( j );
@@ -284,7 +288,7 @@ struct HBJob {
 			std::string don_or_acc =  hb_jobs[ihbjob].don_or_acc;
 			int ir =  hb_jobs[ihbjob].ires;
 			std::string hbgeomtag = don_or_acc + don + "-" + acc;
-			bool override = target.n_residue()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
+			bool override = target.size()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
 			override |= !target.residue(ir).is_protein();
 			if( override ) hbgeomtag += "__" + target_tag;
 			hbond_geoms_cache[ hbgeomtag ] = nullptr;
@@ -306,8 +310,11 @@ struct HBJob {
 			int ir =  hb_jobs[ihbjob].ires;
 			std::string hbgeomtag = don_or_acc + don + "-" + acc;
 
+            // std::cout << hbgeomtag << std::endl;
+            // continue;
+
 			std::map< std::string, core::pose::Pose > hbgeom_exemplars_rtype_override;
-			bool override = target.n_residue()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
+			bool override = target.size()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
 			override |= !target.residue(ir).is_protein();
 			if( override ){
 				std::cout << "add " << target.residue(ir).name() << " to hbgeom_exemplars_rtype_override" << std::endl;
@@ -316,7 +323,7 @@ struct HBJob {
 				tmp0.append_residue_by_jump(target.residue(ir),1);
 				hbgeom_exemplars_rtype_override[ target.residue(ir).name() ] = tmp0;
 				auto & tmp = hbgeom_exemplars_rtype_override[ target.residue(ir).name() ];
-				runtime_assert( tmp.n_residue() == 1 );
+				runtime_assert( tmp.size() == 1 );
 				if( tmp.residue(1).is_lower_terminus() ) core::pose::remove_lower_terminus_type_from_pose_residue( tmp, 1 );
 				if( tmp.residue(1).is_upper_terminus() ) core::pose::remove_upper_terminus_type_from_pose_residue( tmp, 1 );
 				using core::chemical::VIRTUAL_DNA_PHOSPHATE;
@@ -456,7 +463,7 @@ struct HBJob {
 			int nrots = hb_jobs[ihbjob].nrots;
 			int ir =  hb_jobs[ihbjob].ires;
 			std::string hbgeomtag = don_or_acc + don + "-" + acc;
-			bool override = target.n_residue()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
+			bool override = target.size()==1 && ( target.residue(1).name()==don || target.residue(1).name()==acc );
 			override |= !target.residue(ir).is_protein();
 			if( override ) hbgeomtag += "__" + target_tag;
 
@@ -808,8 +815,11 @@ struct HBJob {
 		omp_destroy_lock( & pose_lock );
 		omp_destroy_lock( & hbond_geoms_cache_lock );
 
+		//change me back to exit if want cactually check simple hbonds
 		if( accumulator->n_motifs_found() == 0 ){
 			utility_exit_with_message("no hbonds found, something is wrong");
+			//change me back to exit if want cactually check simple hbonds
+			
 		}
 	}
 
